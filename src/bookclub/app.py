@@ -35,6 +35,7 @@ app = FastAPI(
     title="BookClub API",
     description="A team book club service for tracking books, reading lists, and reviews.",
     version="1.0.0",
+    dependencies=[Depends(rate_limiter.rate_limit_check)],
 )
 
 

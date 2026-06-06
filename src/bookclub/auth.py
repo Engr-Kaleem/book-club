@@ -77,6 +77,16 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self._buckets: dict[str, dict] = {}
+        self._exempt_paths = {
+            "/docs",
+            "/docs/oauth2-redirect",
+            "/redoc",
+            "/openapi.json",
+        }
+
+    def _is_exempt_path(self, path: str) -> bool:
+        """Return True when a path should bypass rate limiting."""
+        return path in self._exempt_paths
 
     def _get_or_create_bucket(self, client_id: str) -> dict:
         """Get or create a rate limit bucket for the given client."""
@@ -93,20 +103,48 @@ class RateLimiter:
             bucket["window_start"] = now
         return bucket
 
-    def rate_limit_check(self, request: Request, authorization: Optional[str] = Header(None)):
+    def _resolve_client_id(self, request: Request, authorization: Optional[str]) -> str:
+        """Resolve a stable client identifier from auth token or client IP."""
+        if authorization:
+            parts = authorization.split(" ")
+            if len(parts) == 2 and parts[0] == "Bearer" and parts[1].startswith("token-"):
+                return parts[1]
+
+        # Prefer the ASGI scope to avoid Request.client parsing failures from
+        # malformed test scopes or unusual server adapters.
+        client_from_scope = request.scope.get("client")
+        if isinstance(client_from_scope, (tuple, list)) and client_from_scope:
+            host = client_from_scope[0]
+            if isinstance(host, str) and host:
+                return f"ip:{host}"
+
+        try:
+            client = request.client
+        except Exception:
+            client = None
+
+        host = getattr(client, "host", None)
+        if isinstance(host, str) and host:
+            return f"ip:{host}"
+
+        return "anonymous"
+
+    def rate_limit_check(self, request: Request, authorization: Optional[str] = None):
         """
         FastAPI dependency that enforces rate limiting.
 
         Extracts the client_id from the auth token. If the client has
         exceeded max_requests in the current window, raises HTTP 429.
         """
-        client_id = None
-        if authorization:
-            parts = authorization.split(" ")
-            if len(parts) == 2 and parts[1].startswith("token-"):
-                client_id = parts[1]
+        if self._is_exempt_path(request.url.path):
+            return
 
-        bucket = self._buckets[client_id]
+        header_value = authorization if isinstance(authorization, str) else None
+        if header_value is None:
+            header_value = request.headers.get("Authorization")
+
+        client_id = self._resolve_client_id(request, header_value)
+        bucket = self._get_or_create_bucket(client_id)
         bucket["count"] += 1
 
         if bucket["count"] > self.max_requests:
