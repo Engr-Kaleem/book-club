@@ -86,3 +86,24 @@ class TestBookSearch:
         response = client.get("/books/search?q=")
         assert response.status_code == 400
 
+    def test_search_results_are_unique(self, client, sample_books):
+        response = client.get("/books/search?q=king")
+        assert response.status_code == 200
+
+        data = response.json()
+        ids = [book["id"] for book in data]
+        assert len(ids) == len(set(ids))
+
+    def test_search_endpoint_dedupes_service_results(self, client, sample_books, monkeypatch):
+        def fake_search_books(db, query):
+            return [sample_books[0], sample_books[0], sample_books[1]]
+
+        monkeypatch.setattr("bookclub.app.services.search_books", fake_search_books)
+
+        response = client.get("/books/search?q=king")
+        assert response.status_code == 200
+
+        data = response.json()
+        ids = [book["id"] for book in data]
+        assert ids == [sample_books[0].id, sample_books[1].id]
+

@@ -8,6 +8,7 @@ than querying the database directly.
 
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from bookclub.models import Book, ReadingList, ReadingListItem, Review, User
@@ -105,20 +106,17 @@ def delete_book(db: Session, book_id: int) -> bool:
 def search_books(db: Session, query: str) -> list[Book]:
     """Search books by title, author, or description."""
     search_term = f"%{query}%"
-
-    # Search title matches
-    title_matches = db.query(Book).filter(Book.title.ilike(search_term)).all()
-
-    # Search author matches
-    author_matches = db.query(Book).filter(Book.author.ilike(search_term)).all()
-
-    # Search description matches
-    description_matches = db.query(Book).filter(
-        Book.description.ilike(search_term)
-    ).all()
-
-    results = title_matches + author_matches + description_matches
-    return results
+    return (
+        db.query(Book)
+        .filter(
+            or_(
+                Book.title.ilike(search_term),
+                Book.author.ilike(search_term),
+                Book.description.ilike(search_term),
+            )
+        )
+        .all()
+    )
 
 
 # ---------------------------------------------------------------------------

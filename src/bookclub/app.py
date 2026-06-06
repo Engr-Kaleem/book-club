@@ -103,7 +103,18 @@ def search_books(q: str, db: Session = Depends(get_db)):
     """Search books by title, author, or description."""
     if not q or not q.strip():
         raise HTTPException(status_code=400, detail="Search query cannot be empty")
-    return services.search_books(db, q.strip())
+
+    # Defensive dedupe at API boundary in case lower layers return repeats.
+    results = services.search_books(db, q.strip())
+    unique_results = []
+    seen_ids = set()
+    for book in results:
+        if book.id in seen_ids:
+            continue
+        seen_ids.add(book.id)
+        unique_results.append(book)
+
+    return unique_results
 
 
 @app.get("/books/{book_id}", response_model=BookResponse, tags=["Books"])
